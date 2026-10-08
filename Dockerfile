@@ -100,7 +100,7 @@ COPY --from=frontend-builder /build/node_modules /app/webui/frontend/node_module
 
 # 启动脚本：bootstrap 用户配置（首次 host 上没 config.*.json 时从 .example 拷一份）
 COPY docker/entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+RUN sed -i 's/\r$//' /entrypoint.sh && chmod +x /entrypoint.sh
 
 EXPOSE 8765
 

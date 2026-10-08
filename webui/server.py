@@ -18,6 +18,9 @@ from .backend.routes import proxy as proxy_routes
 from .backend.routes import auto_loop as auto_loop_routes
 from .backend.routes import outlook as outlook_routes
 from .backend.routes import promo_links as promo_links_routes
+from .backend.routes import personal as personal_routes
+from .backend.routes import personal_checkout as personal_checkout_routes
+from .backend.routes import personal_payment as personal_payment_routes
 
 
 FRONTEND_DIST = Path(__file__).parent / "frontend" / "dist"
@@ -26,6 +29,9 @@ FRONTEND_DIST = Path(__file__).parent / "frontend" / "dist"
 def create_app() -> FastAPI:
     app = FastAPI(title="Gpt-Agreement-Payment webui")
     api_routers = [
+        personal_routes.router,
+        personal_checkout_routes.router,
+        personal_payment_routes.router,
         setup_routes.router,
         auth_routes.router,
         wizard_routes.router,

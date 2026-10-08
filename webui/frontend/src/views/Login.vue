@@ -53,7 +53,7 @@ async function submit() {
   loading.value = true;
   try {
     await api.post("/login", form.value);
-    router.push("/wizard");
+    router.push("/personal");
   } catch (e: any) {
     // 登录失败时再查一次 setup status——如果是因为还没建账号失败，跳 /setup 比
     // 反复弹"登录失败"友好

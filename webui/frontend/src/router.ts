@@ -5,6 +5,7 @@ const BASE = import.meta.env.BASE_URL;
 const router = createRouter({
   history: createWebHistory(BASE),
   routes: [
+    { path: "/personal", component: () => import("./views/Personal.vue") },
     { path: "/setup", component: () => import("./views/Setup.vue") },
     { path: "/login", component: () => import("./views/Login.vue") },
     { path: "/wizard", component: () => import("./views/Wizard.vue") },
@@ -12,7 +13,7 @@ const router = createRouter({
     { path: "/outlook", component: () => import("./views/Outlook.vue") },
     { path: "/promo-links", component: () => import("./views/PromoLinks.vue") },
     { path: "/whatsapp", component: () => import("./views/Whatsapp.vue") },
-    { path: "/", redirect: "/wizard" },
+    { path: "/", redirect: "/personal" },
   ],
 });
 
