@@ -5,7 +5,7 @@
       <details><summary>扩展功能</summary><nav><RouterLink to="/wizard">高级配置</RouterLink><RouterLink to="/run">原有运行器</RouterLink></nav></details>
     </header>
     <h1>使用自己的账号订阅</h1>
-    <p>验证已有账号 → 配置并创建结账会话 → 官方确认付款 → 查询订阅状态</p>
+    <p>验证已有账号 → 创建结账会话 → 读取账单报价并提交付款 → 完成必要验证并查询结果</p>
     <section>
       <h2>01 · 验证自己的账号</h2>
       <p>可直接粘贴整份会话 JSON，也可填写 Session Cookie 的值。程序自动提取登录凭证，其余字段不保存。</p>
@@ -34,12 +34,12 @@
       <label v-if="configuredCards.length">配置中的卡片<select v-model="cardIndex" :disabled="busy"><option v-for="card in configuredCards" :key="card.index" :value="card.index">第 {{ card.index + 1 }} 张 · ****{{ card.last4 }} · {{ card.country }}</option></select></label>
       <p v-if="paymentConfigMessage" class="hint" role="status">{{ paymentConfigMessage }}</p>
       <details class="network-settings">
-        <summary>支付运行器的网络代理设置</summary>
+        <summary>支付代理设置（保存到原配置）</summary>
         <p>此设置保存到本机原支付运行器配置，包括代理的可选认证信息；Session 不参与保存。保存时会同时写入上面的账号查询代理，留空表示直连。此设置不改变浏览器的代理，不发起付款。</p>
         <label>支付代理<input v-model="paymentProxy" :disabled="busy" type="password" autocomplete="off" placeholder="http://host.docker.internal:12334" /></label>
         <button class="term-btn" type="button" :disabled="busy" @click="saveProxy">{{ savingProxy ? '保存中…' : '保存代理设置' }}</button>
         <p v-if="proxyMessage" class="hint" role="status">{{ proxyMessage }}</p>
-        <p class="hint">支持 HTTP(S) 和 SOCKS5。代理留空并保存可恢复直连。保存的是配置，尚未验证代理连通性；原运行器下次启动时读取。</p>
+        <p class="hint">支持 HTTP(S) 和 SOCKS5。代理留空并保存可恢复直连。保存后供个人收单和原运行器读取，尚未验证代理连通性。</p>
       </details>
       <div v-if="result" class="order-config">
         <template v-if="result.subscription?.active">
@@ -187,7 +187,7 @@ async function saveProxy() {
   proxyMessage.value = "";
   try {
     const response = await api.put("/personal/payment-proxy", { payment_proxy: paymentProxy.value, account_proxy: proxy.value });
-    proxyMessage.value = response.data.payment_proxy_enabled ? "支付代理已保存，供原运行器下次启动时使用。" : "已保存：支付请求直连。";
+    proxyMessage.value = response.data.payment_proxy_enabled ? "支付代理已保存，个人收单和原运行器将读取此设置。" : "已保存：支付请求直连。";
   } catch (e: any) {
     const detail = e.response?.data?.detail;
     proxyMessage.value = typeof detail === "string" ? detail : "保存失败，请检查代理地址。";

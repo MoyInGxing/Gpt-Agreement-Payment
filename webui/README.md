@@ -23,7 +23,10 @@ hosted 链接结构，使用账号代理完成鉴权，使用支付代理发起�
 ```
 
 若创建订单响应已包含 `publishable_key` / `stripe_publishable_key`，优先使用该值。
-未提供公钥时明确提示缺少配置，不探测或猜测。收单路径为原源码的网页内部接口，
+未提供公钥时沿用源码的浏览器读取思路：用普通临时 Chromium 打开此订单官方页面，
+只观察该会话真实 `init` 请求中的公钥，应用 `fetch_publishable_key` 阶段代理。
+不会注入账号凭证或进行点击；无法读取（例如页面要求验证）时提示配置或通过官方页面继续，
+不探测或猜测。收单路径为原源码的网页内部接口，
 不是对第三方商户保证兼容的公开 API；官方仍可能要求浏览器上下文或拒绝请求。
 当前代码与模拟服务测试不证明真实订单可成功付款，也不修复已有创建订单 HTTP 400。
 
@@ -31,6 +34,9 @@ hosted 链接结构，使用账号代理完成鉴权，使用支付代理发起�
 创建订单使用 `checkout` 阶段，未配置时回退 `proxy`。取消页面勾选可显式覆盖为指定代理或直连。
 代理支持原字符串以及 `host` / `port` / `user` / `pass` 对象格式。
 验证码、3DS、银行授权均交由本人在官方订单页面完成；不会解题、伪造遥测或自动重试确认。
+`requires_action` 按待验证处理，`setup_intent.succeeded` 仅代表保存支付方式，
+不作为扣款成功（参见 [Stripe PaymentIntent](https://docs.stripe.com/api/payment_intents)
+及 [SetupIntent](https://docs.stripe.com/api/setup_intents)）。
 金额／币种或卡片配置变化会拒绝旧报价，报价十分钟过期。
 付款尝试在 `output/personal-payments.sqlite3` 中记录收单会话 ID、管理员及提交标记，
 不保存卡号、CVC 或登录凭证，重启后仍阻止对相同会话再次提交；网络超时也先查询结果。

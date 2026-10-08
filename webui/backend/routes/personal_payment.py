@@ -11,7 +11,7 @@ import sqlite3
 import threading
 import time
 from contextlib import contextmanager
-from urllib.parse import quote
+from urllib.parse import quote, parse_qs, urlsplit
 
 from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel, Field, SecretStr
@@ -114,13 +114,61 @@ def _order(order_id: str, user: str) -> dict:
     return order
 
 
-def _key(order: dict, cfg: dict) -> str:
+def _discover_key(order: dict, cfg: dict, override) -> str:
+    """Observe the real checkout page's init request, like the source browser path.
+
+    A normal disposable browser, without account injection, evasive switches,
+    clicks, synthetic telemetry or challenge handling. Never probe other keys.
+    """
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        return ""
+    found = ""
+    def observe(request):
+        nonlocal found
+        parsed = urlsplit(request.url)
+        if parsed.scheme == "https" and parsed.hostname == "api.stripe.com" and parsed.path == f"/v1/payment_pages/{order['sid']}/init":
+            values = parse_qs(request.post_data or "").get("key", [])
+            if len(values) == 1 and re.fullmatch(r"pk_(?:live|test)_[A-Za-z0-9]+", values[0]):
+                found = values[0]
+    proxy_url = stage_proxy(cfg, "fetch_publishable_key", override)
+    launch = {"headless": True, "timeout": 15000}
+    if proxy_url:
+        proxy = urlsplit(proxy_url)
+        host = f"[{proxy.hostname}]" if ":" in proxy.hostname else proxy.hostname
+        launch["proxy"] = {"server": f"{proxy.scheme.replace('socks5h', 'socks5')}://{host}:{proxy.port}"}
+        if proxy.username:
+            from urllib.parse import unquote
+            launch["proxy"].update(username=unquote(proxy.username), password=unquote(proxy.password or ""))
+    try:
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(**launch)
+            try:
+                page = browser.new_page()
+                page.on("request", observe)
+                page.goto(order["checkout_url"], wait_until="domcontentloaded", timeout=15000)
+                deadline = time.monotonic() + 5
+                while not found and time.monotonic() < deadline:
+                    page.wait_for_timeout(250)
+            finally:
+                browser.close()
+    except Exception:
+        # No browser diagnostics (URLs can contain order secrets) exposed.
+        return ""
+    return found
+
+
+def _key(order: dict, cfg: dict, override=None) -> str:
     options = cfg.get("personal_payment") or {}
     pk = order.get("pk") or (options.get("publishable_key") if isinstance(options, dict) else None)
+    if not pk:
+        pk = _discover_key(order, cfg, override)
     if not isinstance(pk, str) or not re.fullmatch(r"pk_(?:live|test)_[A-Za-z0-9]+", pk):
-        raise HTTPException(409, "订单未返回收单公钥。请在 personal_payment.publishable_key 配置该订单官方页面使用的公钥；程序不会猜测或探测商户公钥。")
+        raise HTTPException(409, "无法从此订单官方页面读取收单公钥。可在 personal_payment.publishable_key 配置该订单页面使用的公钥，或在官方结账页继续；程序不会猜测或探测商户公钥。")
     if ("_test_" in order["sid"]) != ("_test_" in pk):
         raise HTTPException(409, "订单与收单公钥的测试／正式模式不一致。")
+    order["pk"] = pk
     return pk
 
 
@@ -237,7 +285,7 @@ def prepare(req: PrepareRequest, response: Response, user: str = CurrentUser):
         card = _card(cfg, req.card_index)
         if card["address"]["country"] != order["billing_country"]:
             raise HTTPException(409, "卡片账单国家与订单国家不一致，请核对真实账单后创建订单。")
-        pk = _key(order, cfg)
+        pk = _key(order, cfg, req.payment_proxy)
         try:
             data = _init(order, cfg, req.payment_proxy, pk)
             if _needs_action(data):
@@ -274,6 +322,10 @@ def _state(data: dict) -> dict:
         return {"status": "succeeded", "message": "收单服务报告付款成功，请重新查询账号订阅并核对官方账单。"}
     if data.get("state") in ("failed", "expired", "canceled") or data.get("payment_object_status") in ("canceled", "requires_payment_method"):
         return {"status": "failed", "message": "收单服务返回失败或需要更换支付方式，请在官方结账页检查。"}
+    for obj in (data, data.get("payment_intent"), data.get("setup_intent")):
+        if isinstance(obj, dict) and (obj.get("status") in ("canceled", "failed") or
+                (obj.get("status") == "requires_payment_method" and (obj.get("last_payment_error") or obj.get("last_setup_error")))):
+            return {"status": "failed", "message": "收单服务返回失败或需要更换支付方式，请在官方结账页检查。"}
     # SetupIntent.succeeded only saves a method; it is not a successful charge.
     return {"status": "pending", "message": "付款结果尚未确认，请查询结果或到官方订单核对。不要重复提交。"}
 
@@ -294,7 +346,7 @@ def confirm(req: ConfirmRequest, response: Response, user: str = CurrentUser):
         card = _card(cfg, item["card_index"])
         if _digest(card) != item["card_digest"]:
             raise HTTPException(409, "卡片或账单配置已改变，请重新读取账单金额。")
-        pk = _key(order, cfg)
+        pk = _key(order, cfg, override)
         try:
             data = _init(order, cfg, override, pk)
             if _needs_action(data):
@@ -340,7 +392,7 @@ def status(req: PrepareRequest, response: Response, user: str = CurrentUser):
     with _lock:
         order = _order(req.order_id, user)
         cfg = _config()
-        pk = _key(order, cfg)
+        pk = _key(order, cfg, req.payment_proxy)
         try:
             data = _request(cfg, "poll", req.payment_proxy, "get", f"/payment_pages/{order['sid']}/poll",
                             params={"key": pk, "_stripe_version": STRIPE_VERSION})

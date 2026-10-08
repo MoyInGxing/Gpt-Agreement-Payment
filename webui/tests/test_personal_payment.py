@@ -8,6 +8,7 @@ from webui.tests.test_personal import login, mock_upstream
 
 @pytest.fixture
 def flow(client, monkeypatch, tmp_path):
+    monkeypatch.setattr(payment, "_discover_key", lambda *args: "")
     payment._orders.clear()
     payment._quotes.clear()
     login(client)
@@ -156,6 +157,7 @@ def test_network_uncertainty_durably_blocks_duplicate(client, flow):
 
 def test_setup_intent_success_is_not_charge_success():
     assert payment._state({"setup_intent": {"status": "succeeded"}})["status"] == "pending"
+    assert payment._state({"payment_intent": {"status": "requires_payment_method", "last_payment_error": {"code": "card_declined"}}})["status"] == "failed"
 
 
 def test_missing_key_and_country_mismatch_stop_before_requests(client, flow):
@@ -165,6 +167,21 @@ def test_missing_key_and_country_mismatch_stop_before_requests(client, flow):
     flow["config"]["cards"][0]["address"]["country"] = "IE"
     flow["path"].write_text(json.dumps(flow["config"]))
     assert prepare(client, flow).status_code == 409 and not flow["calls"]
+
+
+def test_discovers_actual_page_key_once_without_guessing(client, flow, monkeypatch):
+    flow["config"]["personal_payment"].pop("publishable_key")
+    flow["path"].write_text(json.dumps(flow["config"]))
+    observations = []
+    def discover(order, cfg, override):
+        observations.append(order["sid"])
+        return "pk_test_frompage"
+    monkeypatch.setattr(payment, "_discover_key", discover)
+    response = prepare(client, flow)
+    assert response.status_code == 200
+    assert confirm(client, response.json()).status_code == 200
+    assert observations == ["cs_test_fixture"]
+    assert "pk_test_frompage" not in response.text
 
 
 def test_expired_quote_cannot_submit(client, flow):
